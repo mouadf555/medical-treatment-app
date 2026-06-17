@@ -114,4 +114,4 @@ base de données de l'interface graphique, rendant le code plus lisible et maint
 ## Réalisé par
 
 - EL-GHOMRY Youssef — ENSAO GI3
-- DAOUDI Mouad — ENSAO GI3
+- DAOUDI Moad — ENSAO GI3
