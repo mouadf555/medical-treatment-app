@@ -24,6 +24,7 @@ import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import javafx.util.converter.IntegerStringConverter;
 
 import java.io.File;
 import java.io.IOException;
@@ -75,35 +76,9 @@ public class MainView {
 
         chargerPatients();
         Scene scene = new Scene(root, 1000, 650);
-
-        // ── CHARGEMENT CSS AMÉLIORÉ ──────────────────────────────────────────
-        try {
-            // Méthode 1 : via classpath (recommandée)
-            URL theme = getClass().getResource("/com/medical/view/medical-theme.css");
-            if (theme != null) {
-                scene.getStylesheets().clear();
-                scene.getStylesheets().add(theme.toExternalForm());
-                System.out.println("✅ CSS chargé avec succès depuis : " + theme.toExternalForm());
-            } else {
-                System.err.println("❌ CSS introuvable dans le classpath");
-
-                // Méthode 2 : via chemin relatif (fallback)
-                File cssFile = new File("src/com/medical/view/medical-theme.css");
-                if (cssFile.exists()) {
-                    String cssUri = cssFile.toURI().toURL().toExternalForm();
-                    scene.getStylesheets().add(cssUri);
-                    System.out.println("✅ CSS chargé depuis : " + cssUri);
-                } else {
-                    System.err.println("❌ Fichier CSS absent : " + cssFile.getAbsolutePath());
-
-                    // Méthode 3 : test avec rouge pour vérifier
-                    scene.getStylesheets().add("data:text/css," + ".root { -fx-background-color: red !important; }");
-                    System.out.println("⚠️ CSS de secours rouge appliqué");
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("❌ Erreur chargement CSS : " + e.getMessage());
-            e.printStackTrace();
+        URL theme = getClass().getResource(THEME_RESOURCE);
+        if (theme != null) {
+            scene.getStylesheets().add(theme.toExternalForm());
         }
 
         setupKeyboardShortcuts(scene, stage);
@@ -245,12 +220,12 @@ public class MainView {
         btnRafraichir.getStyleClass().remove("button-primary");
         btnRafraichir.getStyleClass().add("button-secondary");
 
-        HBox toolbar = new HBox(6, tfRecherche, new Region(), btnAjouter, btnModifier, btnSupprimer, btnRafraichir);
-        HBox.setHgrow(new Region(), Priority.ALWAYS);
+        Region toolbarSpacer = new Region();
+        HBox toolbar = new HBox(6, tfRecherche, toolbarSpacer, btnAjouter, btnModifier, btnSupprimer, btnRafraichir);
+        HBox.setHgrow(toolbarSpacer, Priority.ALWAYS);
         toolbar.setPadding(new Insets(6, 10, 6, 10));
         toolbar.setAlignment(Pos.CENTER_LEFT);
         toolbar.getStyleClass().add("toolbar-panel");
-        HBox.setHgrow(toolbar.getChildren().get(1), Priority.ALWAYS);
 
         tablePatients = new TableView<>();
         Label emptyPatients = new Label("Aucun patient.");
@@ -325,12 +300,13 @@ public class MainView {
         return layout;
     }
 
-    // ── ONGLET TRAITEMENTS ──────────────────────────────────────────────────
+    // ── ONGLET TRAITEMENTS ──────────────────────────────────────
     private SplitPane buildTraitementsTab() {
         VBox sectionHeader = buildSectionHeader(
                 "Plan de traitements",
                 "Prescriptions, durées, prises et progression");
 
+        // ── PATIENT LIST ──────────────────────────────────────────────────────
         listViewPatients = new ListView<>(patients);
         listViewPatients.setPrefWidth(180);
         listViewPatients.setPlaceholder(new Label("Aucun patient"));
@@ -382,15 +358,50 @@ public class MainView {
         cbFiltreType.setValue("Tous");
         cbFiltreType.setMaxWidth(120);
 
+        // ── BUTTONS ──────────────────────────────────────────────────────────
         Button btnAjouterT   = new Button("➕ Ajouter");
         Button btnModifierT  = new Button("✏ Modifier");
         Button btnSupprimerT = new Button("🗑 Supprimer");
         Button btnRafraichirT = new Button("🔄");
 
+        // ── ACTION SUR LE BOUTON AJOUTER ─────────────────────────────────────
+        btnAjouterT.setOnAction(e -> {
+            Patient selected = listViewPatients.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                afficherWarning("Sélection requise", "Veuillez sélectionner un patient dans la liste de gauche.");
+                return;
+            }
+            ouvrirDialogTraitement(selected, null);
+        });
+
+        btnModifierT.setOnAction(e -> {
+            Traitement sel = tableTraitements.getSelectionModel().getSelectedItem();
+            Patient pat = listViewPatients.getSelectionModel().getSelectedItem();
+            if (sel == null) {
+                afficherWarning("Sélection requise", "Veuillez sélectionner un traitement.");
+                return;
+            }
+            if (pat == null) {
+                afficherWarning("Sélection requise", "Veuillez sélectionner un patient.");
+                return;
+            }
+            ouvrirDialogTraitement(pat, sel);
+        });
+
+        btnSupprimerT.setOnAction(e -> supprimerTraitement());
+        btnRafraichirT.setOnAction(e -> {
+            Patient sel = listViewPatients.getSelectionModel().getSelectedItem();
+            if (sel != null) {
+                chargerTraitements(sel.getId(), cbFiltreType.getValue());
+                ToastNotification.show((Stage) tableTraitements.getScene().getWindow(),
+                        "Traitements rafraîchis", "success");
+            }
+        });
+
+        // ── STYLING ──────────────────────────────────────────────────────────
         for (Button btn : new Button[]{btnAjouterT, btnModifierT, btnSupprimerT, btnRafraichirT}) {
             btn.setStyle("-fx-padding: 4 10; -fx-font-size: 11px;");
         }
-
         styliserBoutons(btnAjouterT, btnModifierT, btnSupprimerT, btnRafraichirT);
         btnModifierT.getStyleClass().remove("button-primary");
         btnModifierT.getStyleClass().add("button-secondary");
@@ -399,13 +410,16 @@ public class MainView {
         btnRafraichirT.getStyleClass().remove("button-primary");
         btnRafraichirT.getStyleClass().add("button-secondary");
 
+        // ── TOOLBAR ──────────────────────────────────────────────────────────
+        Region toolbarTSpacer = new Region();
         HBox toolbarT = new HBox(6, new Label("Type:"), cbFiltreType,
-                new Region(), btnAjouterT, btnModifierT, btnSupprimerT, btnRafraichirT);
-        HBox.setHgrow(toolbarT.getChildren().get(2), Priority.ALWAYS);
+                toolbarTSpacer, btnAjouterT, btnModifierT, btnSupprimerT, btnRafraichirT);
+        HBox.setHgrow(toolbarTSpacer, Priority.ALWAYS);
         toolbarT.setPadding(new Insets(6, 10, 6, 10));
         toolbarT.setAlignment(Pos.CENTER_LEFT);
         toolbarT.getStyleClass().add("toolbar-panel");
 
+        // ── TABLE DES TRAITEMENTS ──────────────────────────────────────────
         tableTraitements = new TableView<>();
         tableTraitements.setPlaceholder(new Label("Aucun traitement."));
         tableTraitements.getStyleClass().add("data-table");
@@ -457,40 +471,23 @@ public class MainView {
         tableTraitements.getColumns().addAll(colNomT, colType, colPoso, colPrises, colDebut, colFin, colStatut, colProg);
         tableTraitements.setItems(traitements);
 
-        setupTreatmentContextMenu();
-
+        // ── SÉLECTION PATIENT → charge ses traitements ──────────────────────
         listViewPatients.getSelectionModel().selectedItemProperty().addListener((obs, old, patient) -> {
             if (patient != null) {
                 chargerTraitements(patient.getId(), cbFiltreType.getValue());
                 animateNode(tableTraitements, "fadeIn");
             }
         });
+
         cbFiltreType.setOnAction(e -> {
             Patient sel = listViewPatients.getSelectionModel().getSelectedItem();
             if (sel != null) chargerTraitements(sel.getId(), cbFiltreType.getValue());
         });
 
-        btnAjouterT.setOnAction(e -> {
-            Patient sel = listViewPatients.getSelectionModel().getSelectedItem();
-            if (sel == null) { afficherWarning("Sélection", "Sélectionnez un patient."); return; }
-            ouvrirDialogTraitement(sel, null);
-        });
-        btnModifierT.setOnAction(e -> {
-            Traitement sel = tableTraitements.getSelectionModel().getSelectedItem();
-            Patient pat = listViewPatients.getSelectionModel().getSelectedItem();
-            if (sel == null) { afficherWarning("Sélection", "Sélectionnez un traitement."); return; }
-            ouvrirDialogTraitement(pat, sel);
-        });
-        btnSupprimerT.setOnAction(e -> supprimerTraitement());
-        btnRafraichirT.setOnAction(e -> {
-            Patient sel = listViewPatients.getSelectionModel().getSelectedItem();
-            if (sel != null) {
-                chargerTraitements(sel.getId(), cbFiltreType.getValue());
-                ToastNotification.show((Stage) tableTraitements.getScene().getWindow(),
-                        "Traitements rafraîchis", "success");
-            }
-        });
+        // ── MENU CONTEXTUEL ─────────────────────────────────────────────────
+        setupTreatmentContextMenu();
 
+        // ── LAYOUT ──────────────────────────────────────────────────────────
         VBox leftPane = new VBox(8, lblListePatients, tfPatientSearch, listViewPatients);
         leftPane.setPadding(new Insets(6));
         leftPane.getStyleClass().add("side-panel");
@@ -503,6 +500,7 @@ public class MainView {
         SplitPane split = new SplitPane(leftPane, rightPane);
         split.setDividerPositions(0.22);
         split.getStyleClass().add("medical-split");
+
         return split;
     }
 
@@ -628,13 +626,13 @@ public class MainView {
         return grid;
     }
 
-    // ── DIALOGUE PATIENT ──────────────────────────────────────────────────
+    // ── DIALOGUE PATIENT ────────────────────────────────────────────────────
     private void ouvrirDialogPatient(Patient existant) {
         boolean isEdit = existant != null;
         Dialog<Patient> dialog = new Dialog<>();
         appliquerTheme(dialog);
         dialog.setTitle(isEdit ? "Modifier Patient" : "Ajouter Patient");
-        dialog.setHeaderText(isEdit ? "Modification : " + existant.getNomComplet() : "Nouveau Patient");
+        dialog.setHeaderText(isEdit ? "Modification: " + existant.getNomComplet() : "Nouveau Patient");
 
         ButtonType btnOk  = new ButtonType(isEdit ? "Modifier" : "Ajouter", ButtonBar.ButtonData.OK_DONE);
         ButtonType btnAnn = new ButtonType("Annuler", ButtonBar.ButtonData.CANCEL_CLOSE);
@@ -703,7 +701,7 @@ public class MainView {
         });
     }
 
-    // ── DIALOGUE TRAITEMENT (COMPACT AVEC SCROLLPANE) ──────────────────────
+    // ── DIALOGUE TRAITEMENT (Spinner corrigé : valeur tapée prise en compte) ──
     private void ouvrirDialogTraitement(Patient patient, Traitement existant) {
         boolean isEdit = existant != null;
         Dialog<Traitement> dialog = new Dialog<>();
@@ -715,36 +713,47 @@ public class MainView {
         ButtonType btnAnn = new ButtonType("Annuler", ButtonBar.ButtonData.CANCEL_CLOSE);
         dialog.getDialogPane().getButtonTypes().addAll(btnOk, btnAnn);
 
-        // ── Champs ─────────────────────────────────────────────────────────────
         TextField  tfNomT  = new TextField(isEdit ? existant.getNom() : "");
-        tfNomT.setPrefWidth(180);
+        tfNomT.setPrefWidth(200);
 
         ComboBox<String> cbType = new ComboBox<>();
         cbType.getItems().addAll("Antibiotique", "Antalgique", "Anti-inflammatoire",
                 "Antihypertenseur", "Antidiabétique", "Autre");
         cbType.setValue(isEdit ? existant.getType() : "Antibiotique");
-        cbType.setPrefWidth(150);
+        cbType.setPrefWidth(200);
 
         TextField  tfPoso  = new TextField(isEdit ? existant.getPosologie() : "");
-        tfPoso.setPrefWidth(180);
+        tfPoso.setPrefWidth(200);
 
         TextArea   taEffets = new TextArea(isEdit ? existant.getEffetsSecondaires() : "");
         taEffets.setPrefRowCount(2);
-        taEffets.setPrefWidth(180);
-        taEffets.setPrefHeight(40);
+        taEffets.setPrefWidth(200);
+        taEffets.setPrefHeight(50);
 
         DatePicker dpDebut = new DatePicker(isEdit ? existant.getDateDebut() : LocalDate.now());
         DatePicker dpFin   = new DatePicker(isEdit ? existant.getDateFin() : LocalDate.now().plusDays(7));
 
+        // ── SPINNER PRISES/JOUR – Saisissable, valeur commitée en direct ───
         Spinner<Integer> spinnerPrises = new Spinner<>(1, 10, isEdit ? existant.getPrisesParJour() : 1);
-        spinnerPrises.setPrefWidth(60);
         spinnerPrises.setEditable(true);
+        spinnerPrises.setPrefWidth(80);
+        spinnerPrises.setMaxWidth(100);
+        Tooltip.install(spinnerPrises, new Tooltip("Nombre de prises par jour (1-10)"));
+
+        // FIX: sans TextFormatter, la valeur tapée au clavier n'est validée
+        // qu'au focus-out. Si l'utilisateur tape puis clique direct sur
+        // "Ajouter", la valeur saisie est perdue. Le TextFormatter la
+        // synchronise immédiatement avec la value du Spinner.
+        TextFormatter<Integer> spinnerFormatter = new TextFormatter<>(
+                new IntegerStringConverter(), spinnerPrises.getValue());
+        spinnerPrises.getEditor().setTextFormatter(spinnerFormatter);
+        spinnerFormatter.valueProperty().bindBidirectional(spinnerPrises.getValueFactory().valueProperty());
 
         Slider sliderDuree = new Slider(1, 90, isEdit ? existant.getDureeEstimee() : 7);
         sliderDuree.setShowTickLabels(true);
         sliderDuree.setShowTickMarks(true);
         sliderDuree.setMajorTickUnit(30);
-        sliderDuree.setMaxWidth(150);
+        sliderDuree.setMaxWidth(200);
         Label lblDuree = new Label("Durée : " + (int) sliderDuree.getValue() + " jours");
         sliderDuree.valueProperty().addListener((obs, old, nw) ->
                 lblDuree.setText("Durée : " + nw.intValue() + " jours"));
@@ -753,49 +762,61 @@ public class MainView {
         cbActif.setSelected(!isEdit || existant.isActif());
 
         ProgressBar pbProg = new ProgressBar(isEdit ? existant.getProgression() : 0);
-        pbProg.setPrefWidth(150);
+        pbProg.setPrefWidth(200);
 
         ColorPicker cpCouleur = new ColorPicker(
                 isEdit && existant.getCouleur() != null ? Color.web(existant.getCouleur()) : Color.web("#2196F3"));
-        cpCouleur.setPrefWidth(120);
+        cpCouleur.setPrefWidth(150);
 
-        // ── GridPane avec des marges réduites ────────────────────────────────
         GridPane g = new GridPane();
-        g.setHgap(8);
-        g.setVgap(6);
-        g.setPadding(new Insets(12));
+        g.setHgap(12);
+        g.setVgap(10);
+        g.setPadding(new Insets(18));
         g.getStyleClass().add("dialog-form");
 
         int row = 0;
-        g.add(new Label("Nom *"), 0, row); g.add(tfNomT, 1, row++);
-        g.add(new Label("Type"), 0, row); g.add(cbType, 1, row++);
-        g.add(new Label("Posologie"), 0, row); g.add(tfPoso, 1, row++);
-        g.add(new Label("Prises/jour"), 0, row); g.add(spinnerPrises, 1, row++);
-        g.add(new Label("Début"), 0, row); g.add(dpDebut, 1, row++);
-        g.add(new Label("Fin"), 0, row); g.add(dpFin, 1, row++);
-        g.add(lblDuree, 0, row); g.add(sliderDuree, 1, row++);
-        g.add(new Label("Effets secondaires"), 0, row); g.add(taEffets, 1, row++);
-        g.add(cbActif, 1, row++);
-        g.add(new Label("Couleur"), 0, row); g.add(cpCouleur, 1, row);
+        g.add(new Label("Nom *"), 0, row);
+        g.add(tfNomT, 1, row++);
 
-        // ── Encapsuler dans un ScrollPane pour les petits écrans ─────────────
+        g.add(new Label("Type"), 0, row);
+        g.add(cbType, 1, row++);
+
+        g.add(new Label("Posologie"), 0, row);
+        g.add(tfPoso, 1, row++);
+
+        g.add(new Label("Prises/jour"), 0, row);
+        g.add(spinnerPrises, 1, row++);
+
+        g.add(new Label("Début"), 0, row);
+        g.add(dpDebut, 1, row++);
+
+        g.add(new Label("Fin"), 0, row);
+        g.add(dpFin, 1, row++);
+
+        g.add(lblDuree, 0, row);
+        g.add(sliderDuree, 1, row++);
+
+        g.add(new Label("Effets secondaires"), 0, row);
+        g.add(taEffets, 1, row++);
+
+        g.add(cbActif, 1, row++);
+
+        g.add(new Label("Couleur"), 0, row);
+        g.add(cpCouleur, 1, row);
+
         ScrollPane scroll = new ScrollPane(g);
         scroll.setFitToWidth(true);
         scroll.setFitToHeight(true);
-        scroll.setMaxHeight(400);
-        scroll.setPrefHeight(350);
+        scroll.setMaxHeight(420);
+        scroll.setPrefHeight(370);
         scroll.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
 
         dialog.getDialogPane().setContent(scroll);
+        dialog.getDialogPane().setPrefWidth(560);
+        dialog.getDialogPane().setMaxWidth(650);
 
-        // ── Réduire la taille du dialogue ─────────────────────────────────────
-        dialog.getDialogPane().setPrefWidth(450);
-        dialog.getDialogPane().setMaxWidth(500);
-
-        // ── Focus ─────────────────────────────────────────────────────────────
         Platform.runLater(tfNomT::requestFocus);
 
-        // ── Résultat ──────────────────────────────────────────────────────────
         dialog.setResultConverter(bt -> {
             if (bt == btnOk) {
                 if (tfNomT.getText().isBlank()) {
