@@ -32,7 +32,7 @@ Avant de commencer, assure-toi d'avoir installé :
 
 ### 1. Cloner le projet
 ```bash
-git clone https://github.com/YoussefEl-ghomry1/medical-treatment-app.git
+git clone https://github.com/mouadf555/medical-treatment-app.git
 ```
 Ouvrir le dossier dans **IntelliJ IDEA**.
 
